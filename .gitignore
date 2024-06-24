@@ -4,3 +4,4 @@ __pycache__/box_counting.cpython-311.pyc
 /inputs
 /outputs
 /runs
+*.pyc
