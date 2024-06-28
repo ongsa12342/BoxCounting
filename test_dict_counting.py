@@ -1,32 +1,9 @@
 import torch
+from torchvision import transforms
 import numpy as np
 import cv2
 from ultralytics import YOLO
 from utils.cluster import cluster_boxes
-
-def letterbox_image(image, target_size):
-        """
-        Resize image with unchanged aspect ratio using padding.
-        """
-        height, width, _ = image.shape
-        scale = min(target_size / width, target_size / height)
-        new_width = int(width * scale)
-        new_height = int(height * scale)
-
-        # Resize the image with the computed scale
-        resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
-
-        # Create a new image with the target size and fill it with black (zeros)
-        padded_image = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-
-        # Compute top-left corner for the resized image to be centered
-        x_offset = (target_size - new_width) // 2
-        y_offset = (target_size - new_height) // 2
-
-        # Place the resized image in the padded image
-        padded_image[y_offset:y_offset + new_height, x_offset:x_offset + new_width, :] = resized_image
-
-        return padded_image
 
 def box_counting(image_tensor, model_path='models/v13.pt', conf_threshold=0.3):
     # Load the YOLO model
@@ -77,13 +54,60 @@ def box_counting(image_tensor, model_path='models/v13.pt', conf_threshold=0.3):
         "conf": conf
     }
 
+def cv2_to_torch_image(image, target_size=1280, stride=32):
+
+    
+    # Step 2: Resize the image while maintaining the aspect ratio
+    height, width = image.shape[:2]
+    if height > width:
+        new_height = target_size
+        new_width = int(target_size * width / height)
+    else:
+        new_width = target_size
+        new_height = int(target_size * height / width)
+    
+    # Ensure new dimensions are divisible by the stride
+    new_height = (new_height // stride) * stride
+    new_width = (new_width // stride) * stride
+    
+    resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    
+    # Step 3: Convert color space from BGR to RGB
+    rgb_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
+    
+    # Step 4: Normalize pixel values to [0, 1]
+    normalized_image = rgb_image / 255.0
+    
+    # Step 5: Convert the image to a PyTorch tensor and add batch dimension
+    tensor_image = torch.tensor(normalized_image).permute(2, 0, 1).float().unsqueeze(0)
+    
+    return tensor_image
 # Read the image
 image = cv2.imread('inputs/ceva/4549_33.png')
-# Convert the image to tensor and resize it
-target_size = 1280
-padded_image = letterbox_image(image, target_size)
-image_tensor = torch.from_numpy(padded_image).permute(2, 0, 1).unsqueeze(0)
-# Ensure the tensor is of type float and normalized
-image_tensor = image_tensor.float() / 255.0
-print(box_counting(image_tensor))
+image_tensor = cv2_to_torch_image(image)
+result_dict = box_counting(image_tensor)
+print(result_dict)
 
+
+def draw_boxes(image, result_dict):
+    for box in result_dict["cbbox"]:
+        x1, y1, x2, y2 = box
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    
+    for box in result_dict["bbox"]:
+        x1, y1, x2, y2 = box
+        cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 0), 1)
+    
+    return image
+
+
+# Draw bounding boxes on the image
+output_image = draw_boxes(image, result_dict)
+
+# Display the output image with bounding boxes
+cv2.imshow('Output Image', output_image)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
+# Optionally save the output image
+cv2.imwrite('output_with_boxes.png', output_image)
